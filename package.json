@@ -1,0 +1,15 @@
+{
+  "name": "secret-contract",
+  "private": true,
+  "description": "Silent Contract: a 2D noir sniper game for phones and browsers.",
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node tests/smoke.mjs",
+    "serve": "python devserver.py 8771"
+  },
+  "devDependencies": {
+    "playwright": "1.47.2"
+  }
+}
