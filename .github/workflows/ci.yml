@@ -48,24 +48,91 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
 
-      - name: Upload site for GitHub Pages
+      - name: Upload built site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          path: dist
+          name: site
+          path: dist/
+          include-hidden-files: true
+          retention-days: 7
 
   deploy:
-    name: Deploy to GitHub Pages
+    name: Deploy to Oracle Cloud
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 10
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+      ORACLE_USER: ${{ secrets.ORACLE_USER }}
+      ORACLE_PORT: ${{ secrets.ORACLE_PORT || '22' }}
+      SITE_DIR: /var/www/silent-contract
     steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Check deploy secrets
+        id: cfg
+        env:
+          HAS_KEY: ${{ secrets.ORACLE_SSH_KEY != '' }}
+        run: |
+          missing=""
+          [ -n "$ORACLE_HOST" ] || missing="$missing ORACLE_HOST"
+          [ -n "$ORACLE_USER" ] || missing="$missing ORACLE_USER"
+          [ "$HAS_KEY" = "true" ] || missing="$missing ORACLE_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::warning::Deploy skipped. Missing repository secrets:$missing. See README > One-time Oracle Cloud setup."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download built site
+        if: steps.cfg.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: dist
+
+      - name: Configure SSH
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::ORACLE_KNOWN_HOSTS is not set; trusting the host key on first use."
+            ssh-keyscan -p "$ORACLE_PORT" -H "$ORACLE_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload files with rsync
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          rsync -az --delete --checksum \
+            -e "ssh -i ~/.ssh/deploy_key -p $ORACLE_PORT -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+            dist/ "$ORACLE_USER@$ORACLE_HOST:$SITE_DIR/"
+
+      - name: Check the live site
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 "http://$ORACLE_HOST/" | grep -q "Silent Contract"; then
+              echo "Live: http://$ORACLE_HOST/"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::http://$ORACLE_HOST/ did not serve the game. Check nginx on the instance and that TCP port 80 is open in the Oracle security list."
+          exit 1
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
