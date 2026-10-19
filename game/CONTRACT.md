@@ -203,3 +203,13 @@ Screens: title, chapter + mission select (locks, stars), story panels (comic pan
 HUD (updated in `onFrame`): ammo pips, reload/bolt progress, wind arrow + m/s, range in metres, timer, alarm meter, breath meter, targets left, earpiece subtitles from `message` events, toasts for headshot/kill/alert. Touch controls: big FIRE button (right), SCOPE toggle, press-and-hold HOLD BREATH, RELOAD, zoom +/−, pause. Buttons must use pointer events and not steal canvas drags.
 Save via `LW.store` under key `silentContract.save.v1`: `{ money, weapons: [ids], equipped, gear: { scope: 0, ... }, missions: { m1: { stars } }, settings: { sound: true, music: true, sensitivity: 1 }, seenIntro }`. Missions unlock in order.
 `LW.Audio`: WebAudio synthesized sounds (no files) for the names listed in Core plus `click`, `win`, `fail`, `cash`, `type`; `LW.Audio.ambience(time)` loops rain/city hum, `LW.Audio.stopAmbience()`; a quiet procedural noir music bed on menus. Start the AudioContext on the first user gesture.
+
+## Changes since the first version
+
+- **Scope zoom:** `LW.CONST.OPTIC = 5`. Scoped `view.zoom` = scope magnification x OPTIC (a 3x scope shows the world at zoom 15, max 8x = 40). The HUD shows `view.zoom / OPTIC`. Zoom steps are 0.5 x OPTIC, minimum 1.5 x OPTIC.
+- **Ballistics:** `DROP_K` is 5.0e-5. Core sway amplitude is 2.2 world units x `swayMul`.
+- **Core options:** `LW.Core.start(mission, loadout, hooks, { sensitivity, invertDrag, tapToScope })` and `LW.Core.setOptions(sameShape)` for live changes from the pause menu. By default the crosshair follows the finger (LONEWOLF style); `invertDrag: true` drags the world. `tapToScope` (default on): a quick tap on the city while unscoped scopes in on that spot. The newest finger on the canvas always takes over aiming.
+- **State:** `state.lastShot = { t, x, y, dist, hit: 'head'|'body'|null }` after each bullet lands; render draws a tracer for `state.bullets` and a hit/miss ring at `lastShot`.
+- **Page gestures:** while a mission runs, core sets `touch-action: none` and `overscroll-behavior: none` on html/body and cancels canvas touchmove, so drags never scroll the page.
+- **Audio (ui.js):** `LW.Audio.setVolumes(sfx, music)`, `setMuted`, `isMuted`, `getState()`. Saves gain `sfxVolume`, `musicVolume`, `muted`, `aimInvert`, `tapToScope`.
+- **Building windows:** bay size is 5000/dist by 6000/dist world units (about 2.5 m by 3 m).
