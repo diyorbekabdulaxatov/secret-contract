@@ -133,6 +133,24 @@ jobs:
           echo "::error::http://$ORACLE_HOST/ did not serve the game. Check nginx on the instance and that TCP port 80 is open in the Oracle security list."
           exit 1
 
+      - name: Diagnose the server
+        if: failure() && steps.cfg.outputs.ready == 'true'
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$ORACLE_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'EOF' || true
+          echo "== nginx service"; systemctl is-active nginx || true
+          echo "== nginx config test"; sudo -n nginx -t 2>&1 || echo "(cannot run nginx -t without a password)"
+          echo "== local request to http://127.0.0.1/"; curl -sS -m 5 -o /dev/null -w "HTTP %{http_code}\n" http://127.0.0.1/ || echo "no answer on port 80 locally"
+          echo "== listening on port 80"; (ss -ltnp 2>/dev/null || netstat -ltn 2>/dev/null) | grep -E ':80\b' || echo "nothing listens on port 80"
+          echo "== firewalld"; (sudo -n firewall-cmd --list-services 2>/dev/null) || echo "firewalld not active or no sudo"
+          echo "== iptables INPUT"; (sudo -n iptables -S INPUT 2>/dev/null | head -20) || echo "iptables not readable"
+          echo "== site folder"; ls -la /var/www/silent-contract | head -10
+          EOF
+          echo
+          echo "If the local request above says HTTP 200 but the live check failed, the server works and"
+          echo "port 80 is blocked outside it: add an ingress rule for TCP 80 from 0.0.0.0/0 to the"
+          echo "Oracle Cloud security list (or NSG) of the instance's subnet."
+
       - name: Remove SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
