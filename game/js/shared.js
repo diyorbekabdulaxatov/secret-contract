@@ -10,7 +10,7 @@ window.LW = window.LW || {};
     DROP_K: 5.0e-5,    // bullet drop (world units, downward) = DROP_K * dist^2 * loadout.dropMul
     WIND_K: 0.0034,    // wind drift (world units) = WIND_K * wind(m/s, + blows right) * dist
     MARK: 5,           // reticle hash spacing in world units
-    OPTIC: 3,          // camera zoom per 1x of scope magnification (a 4x scope shows the world at zoom 12)
+    OPTIC: 5,          // camera zoom per 1x of scope magnification (a 4x scope shows the world at zoom 20)
     MIN_DIST: 60,
     MAX_DIST: 600,
     HEAD_LENIENCY: 1.2 // head hit radius multiplier, keeps headshots fair on phones

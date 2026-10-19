@@ -10,7 +10,7 @@ window.LW = window.LW || {};
   var PI2 = Math.PI * 2;
   var SODIUM = '#e8a33d', PAPER = '#e9e3d6', FOG = '#9aa7b2', BLOOD = '#9c2b2b';
   var SAVE_KEY = 'silentContract.save.v1';
-  var HINT_KEY = 'silentContract.hint.v1';
+  var HINT_KEY = 'silentContract.hint.v2';   // v2: new drag/tap controls, show the notes again once
 
   var store = LW.store || { get: function (k, f) { return f; }, set: function () {} };
 
@@ -682,7 +682,7 @@ window.LW = window.LW || {};
     chapterTitle: 'chapter-title', chapterSub: 'chapter-sub', missionGrid: 'mission-grid',
     storyCanvas: 'story-canvas', storyCaption: 'story-caption', storySpeaker: 'story-speaker',
     storyText: 'story-text', storyNext: 'story-next', storyCount: 'story-count', storySkip: 'story-skip',
-    briefFile: 'brief-file', briefTitle: 'brief-title', briefLoc: 'brief-loc', briefBadges: 'brief-badges',
+    briefDossier: 'brief-dossier', briefFile: 'brief-file', briefTitle: 'brief-title', briefLoc: 'brief-loc', briefBadges: 'brief-badges',
     briefText: 'brief-text', briefIntelWrap: 'brief-intel-wrap', briefIntel: 'brief-intel',
     briefObjWrap: 'brief-obj-wrap', briefObjectives: 'brief-objectives', briefConditions: 'brief-conditions',
     briefReward: 'brief-reward', briefLoadout: 'brief-loadout', briefAccept: 'brief-accept',
@@ -706,6 +706,7 @@ window.LW = window.LW || {};
   var SCREEN_NAMES = ['title', 'missions', 'story', 'briefing', 'results', 'armory', 'settings'];
   var SCREENS = {};
   var current = null;
+  var enterTimer = 0;
 
   function grabElements() {
     var missing = [];
@@ -732,7 +733,13 @@ window.LW = window.LW || {};
     if (name && SCREENS[name]) {
       SCREENS[name].scrollTop = 0;
       SCREENS[name].classList.remove('enter');
-      if (!reduceMotion) { void SCREENS[name].offsetWidth; SCREENS[name].classList.add('enter'); }
+      if (!reduceMotion) {
+        var scr = SCREENS[name];
+        void scr.offsetWidth;
+        scr.classList.add('enter');
+        clearTimeout(enterTimer);
+        enterTimer = setTimeout(function () { scr.classList.remove('enter'); }, 1000);
+      }
       if (focusId) focusSoon(focusId);
       else {
         var b = SCREENS[name].querySelector('button:not([disabled])');
@@ -1749,11 +1756,13 @@ window.LW = window.LW || {};
     E.chapterTitle.textContent = ch.id === 0 ? (ch.title || 'Shooting Range') : 'Chapter ' + ch.id + ': ' + (ch.title || '');
     E.chapterSub.textContent = ch.subtitle || '';
     clear(E.missionGrid);
-    each(chapterMissions(ch.id), function (m) {
+    each(chapterMissions(ch.id), function (m, k) {
       var unlocked = isUnlocked(m), stars = starsOf(m.id), idx = CAMPAIGN.indexOf(m);
-      var b = mk('button', 'mcard' + (!unlocked ? ' locked' : (stars && m !== RANGE) ? ' done' : ' new'));
+      var b = mk('button', 'mcard' + (!unlocked ? ' locked' : (stars && m !== RANGE) ? ' done' : ' new') + (reduceMotion ? '' : ' deal'));
       b.type = 'button';
       b.id = 'mission-card-' + m.id;
+      if (!reduceMotion) b.style.animationDelay = (k * 0.05) + 's';
+      if (unlocked && stars && m !== RANGE) b.appendChild(mk('span', 'c-stamp', stars >= 3 ? 'Clean' : 'Closed'));
       var top = mk('span', 'c-top');
       top.appendChild(mk('span', null, m === RANGE ? 'TRAINING' : 'M-' + pad2(idx + 1)));
       top.appendChild(mk('span', 'c-stars', starStr(stars)));
@@ -1773,6 +1782,7 @@ window.LW = window.LW || {};
       b.addEventListener('click', function () {
         if (!isUnlocked(m)) {
           Audio.play('click');
+          b.style.animationDelay = '0s';
           b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
           menuToast('Close the previous contract first.');
           return;
@@ -1823,7 +1833,7 @@ window.LW = window.LW || {};
     if (hasRole(m, 'attacker')) badge('Defend');
     if (hasRole(m, 'ally')) badge('Protect');
     if (rules.noCivilianKills !== false) badge('No civilians', true);
-    E.briefText.textContent = m.briefing || '';
+    briefType(m.briefing || '');
 
     clear(E.briefIntel);
     each(arr(m.intel), function (it) {
@@ -1878,6 +1888,41 @@ window.LW = window.LW || {};
     dl(E.briefLoadout, 'Suppressor', lo.suppressed ? (w.suppressed ? 'Integral' : 'Fitted') : 'None');
     dl(E.briefLoadout, 'Computer', lo.computer ? 'Installed' : 'None');
   }
+  // Typewriter reveal of the dossier text. The untyped rest stays in the layout (hidden) so nothing jumps.
+  var BriefType = { timer: 0, text: '', n: 0, typed: null, ghost: null, forId: null };
+  function briefType(text) {
+    clearInterval(BriefType.timer); BriefType.timer = 0;
+    BriefType.text = String(text || '');
+    clear(E.briefText);
+    BriefType.typed = mk('span', 'typed');
+    BriefType.ghost = mk('span', 'ghost');
+    E.briefText.appendChild(BriefType.typed);
+    E.briefText.appendChild(BriefType.ghost);
+    var id = Brief.m ? Brief.m.id : null;
+    if (reduceMotion || !BriefType.text || BriefType.forId === id) { BriefType.forId = id; briefTypeDone(); return; }
+    BriefType.forId = id;
+    BriefType.n = 0;
+    BriefType.ghost.textContent = BriefType.text;
+    E.briefText.classList.add('typing');
+    var t0 = now(), lastSnd = 0;
+    BriefType.timer = setInterval(function () {
+      if (current !== 'briefing') { briefTypeDone(); return; }
+      var t = now(), n = Math.min(BriefType.text.length, Math.max(0, Math.floor((t - t0 - 280) / 1000 * 90)));
+      if (n <= BriefType.n) return;
+      BriefType.n = n;
+      BriefType.typed.textContent = BriefType.text.slice(0, n);
+      BriefType.ghost.textContent = BriefType.text.slice(n);
+      if (t - lastSnd > 90 && /\S/.test(BriefType.text.charAt(n - 1))) { Audio.play('type'); lastSnd = t; }
+      if (n >= BriefType.text.length) briefTypeDone();
+    }, 30);
+  }
+  function briefTypeDone() {
+    clearInterval(BriefType.timer); BriefType.timer = 0;
+    if (BriefType.typed) BriefType.typed.textContent = BriefType.text;
+    if (BriefType.ghost) BriefType.ghost.textContent = '';
+    E.briefText.classList.remove('typing');
+  }
+
   function briefBack() {
     Audio.play('click');
     if (Brief.from === 'title') showTitle(); else showMissions();
@@ -1899,32 +1944,70 @@ window.LW = window.LW || {};
     } catch (e) { /* ignore */ }
   }
 
+  // Objectives that are satisfied by killing every target/attacker get a check mark when targetsLeft hits 0.
+  var RULE_RX = /^\s*(do not|don't|dont|no |never|avoid|keep|protect|stay|without|leave|spare|survive)/i;
+  var GOAL_RX = /(eliminat|kill|take (him |her |them )?out|neutrali[sz]|assassinat|stop|silence|remove|drop|shoot|hit |destroy|down |put down|finish|end |defend|hold|clear|paper|target)/i;
+
   function hudSetup(m, lo) {
     var i;
-    Hud.cache = {}; Hud.subQ = []; Hud.subBusy = false; Hud.toastPri = 0;
-    clearTimeout(Hud.subTimer); clearTimeout(Hud.toastTimer);
-    E.sub.classList.remove('on');
+    Hud.cache = {}; Hud.subQ = []; Hud.subBusy = false; Hud.toastPri = 0; Hud.maxTargets = 0; Hud.tallyN = -1;
+    Hud.windAvg = null; Hud.windT = 0; Hud.gustUntil = 0;
+    clearTimeout(Hud.subTimer); clearTimeout(Hud.toastTimer); clearInterval(Hud.typeTimer);
+    E.sub.classList.remove('on'); E.sub.classList.remove('typing');
+    E.subText.textContent = ''; E.subSpeaker.textContent = ''; E.subSr.textContent = '';
     E.toast.className = 'hud-toast'; E.toast.textContent = '';
-    clear(E.objectives);
-    each(arr(m.objectives).slice(0, 4), function (o) { E.objectives.appendChild(mk('li', null, String(o))); });
+    clear(E.objectives); Hud.objItems = [];
+    each(arr(m.objectives).slice(0, 3), function (o) {
+      var text = String(o), li = mk('li', RULE_RX.test(text) ? 'rule' : null, text);
+      li.title = text;
+      E.objectives.appendChild(li);
+      Hud.objItems.push({ el: li, goal: !RULE_RX.test(text) && GOAL_RX.test(text) });
+    });
+    // if no objective reads like a kill order, tick the first non-rule one when the board is clear
+    var anyGoal = false;
+    each(Hud.objItems, function (it) { if (it.goal) anyGoal = true; });
+    if (!anyGoal) each(Hud.objItems, function (it) { if (!anyGoal && !RULE_RX.test(it.el.textContent)) { it.goal = true; anyGoal = true; } });
+    clear(E.tally); E.targetsRow.classList.remove('clear');
     clear(E.pips); Hud.pips = [];
     for (i = 0; i < lo.magazine; i++) { var p = mk('i'); E.pips.appendChild(p); Hud.pips.push(p); }
     E.timer.hidden = !(num(m.timeLimit, 0) > 0);
     E.timer.classList.remove('warn');
     if (!E.timer.hidden) E.timer.textContent = fmtTime(m.timeLimit);
-    E.alarm.hidden = true; E.alarm.classList.remove('raised');
+    E.alarm.hidden = true; E.alarm.classList.remove('raised'); E.alarm.classList.remove('hot');
     E.scope.classList.remove('on');
     E.zoomIn.hidden = true; E.zoomOut.hidden = true; E.zoom.hidden = true;
     E.breath.classList.remove('holding'); E.breath.classList.remove('shaky');
     E.fire.classList.remove('busy');
-    E.ringLabel.textContent = '';
+    E.reload.classList.remove('suggest');
+    E.ringLabel.textContent = 'Ready'; E.ringLabel.className = '';
+    E.gust.classList.remove('on'); E.windPanel.classList.remove('gusting');
+    E.windSvg.setAttribute('class', 'calm');
+    E.range.textContent = '---'; E.rangeLz.textContent = ''; E.rangeBox.className = 'rf-box none';
+    E.breathFill.style.strokeDashoffset = '0';
+    updateSoundBtn();
+  }
+
+  function renderTally(left) {
+    var total = Hud.maxTargets, i, n = Math.min(total, 6);
+    if (Hud.tallyN !== n) {
+      clear(E.tally);
+      for (i = 0; i < n; i++) E.tally.appendChild(mk('i'));
+      Hud.tallyN = n;
+    }
+    var done = total - left, kids = E.tally.childNodes;
+    for (i = 0; i < kids.length; i++) kids[i].className = i < done ? 'done' : '';
+    E.tally.hidden = total < 2 || total > 6;
+    var clearNow = total > 0 && left === 0;
+    E.targetsRow.classList.toggle('clear', clearNow);
+    each(Hud.objItems || [], function (it) { if (it.goal) it.el.classList.toggle('done', clearNow); });
   }
 
   function hudFrame(s) {
     if (!s) return;
-    var C = Hud.cache, v, i;
-    v = num(s.targetsLeft, 0);
-    if (C.tl !== v) { C.tl = v; E.targets.textContent = String(v); }
+    var C = Hud.cache, v, i, tnow = now();
+    v = Math.max(0, Math.floor(num(s.targetsLeft, 0)));
+    if (v > Hud.maxTargets) Hud.maxTargets = v;
+    if (C.tl !== v) { C.tl = v; E.targets.textContent = String(v); renderTally(v); }
 
     if (s.timeLeft !== null && s.timeLeft !== undefined && isFinite(s.timeLeft)) {
       v = Math.max(0, Math.ceil(s.timeLeft));
@@ -1940,18 +2023,41 @@ window.LW = window.LW || {};
       E.alarmPct.textContent = raised ? '' : v + '%';
       E.alarmLabel.textContent = raised ? 'Alarm raised' : 'Suspicion';
       E.alarm.classList.toggle('raised', raised);
+      E.alarm.classList.toggle('hot', !raised && v >= 60);
     }
 
-    v = Math.round(num(s.wind, 0) * 10) / 10;
+    // wind: animated flow arrow (speed follows strength) and a flickering GUST tag on fast changes
+    var wraw = num(s.wind, 0);
+    if (Hud.windAvg === null) { Hud.windAvg = wraw; Hud.windT = tnow; }
+    var wdt = Math.min(0.25, Math.max(0, (tnow - Hud.windT) / 1000));
+    Hud.windT = tnow;
+    Hud.windAvg += (wraw - Hud.windAvg) * Math.min(1, wdt / 1.6);
+    if (Math.abs(wraw - Hud.windAvg) > 0.35) Hud.gustUntil = tnow + 900;
+    var gusting = tnow < Hud.gustUntil;
+    if (C.gust !== gusting) { C.gust = gusting; E.gust.classList.toggle('on', gusting); E.windPanel.classList.toggle('gusting', gusting); }
+    v = Math.round(wraw * 10) / 10;
     if (C.wind !== v) {
       C.wind = v;
       E.wind.textContent = Math.abs(v).toFixed(1);
-      E.windSvg.classList.toggle('left', v < 0);
-      E.windSvg.classList.toggle('calm', Math.abs(v) < 0.1);
+      var calm = Math.abs(v) < 0.1;
+      var bucket = calm ? 0 : Math.max(1, Math.round(Math.abs(v) * 2));
+      if (C.windBucket !== bucket || C.windLeft !== (v < 0)) {
+        C.windBucket = bucket; C.windLeft = v < 0;
+        E.windSvg.setAttribute('class', calm ? 'calm' : (v < 0 ? 'left' : ''));
+        if (!calm) E.windSvg.style.setProperty('--wdur', clamp(1.8 / (bucket / 2), 0.22, 2.4).toFixed(2) + 's');
+      }
     }
 
     v = (s.range === null || s.range === undefined || !isFinite(s.range)) ? -1 : Math.round(s.range);
-    if (C.range !== v) { C.range = v; E.range.textContent = v < 0 ? '---' : String(v); }
+    if (C.range !== v) {
+      C.range = v;
+      if (v < 0) { E.rangeLz.textContent = ''; E.range.textContent = '---'; E.rangeBox.className = 'rf-box none'; }
+      else {
+        var rs = String(v), lz = '';
+        while (lz.length + rs.length < 3) lz += '0';
+        E.rangeLz.textContent = lz; E.range.textContent = rs; E.rangeBox.className = 'rf-box';
+      }
+    }
 
     var sc = !!s.scoped;
     if (C.scoped !== sc) {
@@ -1965,7 +2071,7 @@ window.LW = window.LW || {};
     }
 
     v = Math.round(clamp(num(s.breath, 1), 0, 1) * 40) / 40;
-    if (C.breath !== v) { C.breath = v; E.breathFill.style.transform = 'scaleX(' + v + ')'; }
+    if (C.breath !== v) { C.breath = v; E.breathFill.style.strokeDashoffset = String(Math.round((1 - v) * 1000) / 10); }
     var hold = !!s.holding, shaky = !!s.shaky;
     if (C.hold !== hold) { C.hold = hold; E.breath.classList.toggle('holding', hold); }
     if (C.shaky !== shaky) { C.shaky = shaky; E.breath.classList.toggle('shaky', shaky); }
@@ -1984,9 +2090,12 @@ window.LW = window.LW || {};
     if (C.mode !== mode) {
       C.mode = mode;
       E.ring.setAttribute('class', mode === 'ready' ? 'ready' : '');
-      E.ringLabel.textContent = mode === 'reload' ? 'Reloading' : mode === 'bolt' ? 'Cycling' : mode === 'empty' ? 'Empty' : '';
+      E.ringLabel.textContent = mode === 'reload' ? 'Reloading' : mode === 'bolt' ? 'Cycling' : mode === 'empty' ? 'Empty' : 'Ready';
+      E.ringLabel.className = mode === 'empty' ? 'empty' : mode === 'ready' ? '' : 'busy';
       E.fire.classList.toggle('busy', mode !== 'ready');
     }
+    var suggest = mode !== 'reload' && ammo < Hud.pips.length && ammo <= 1;
+    if (C.suggest !== suggest) { C.suggest = suggest; E.reload.classList.toggle('suggest', suggest); }
     if (C.ring !== p) { C.ring = p; E.ringArc.style.strokeDashoffset = String(100 * (1 - p)); }
   }
 
@@ -1997,6 +2106,8 @@ window.LW = window.LW || {};
     var el = E.toast;
     el.className = 'hud-toast';
     el.textContent = text;
+    Hud.toastN = (Hud.toastN || 0) + 1;
+    el.style.setProperty('--rot', (((Hud.toastN % 2 ? -4 : 3) + Math.random() * 2 - 1).toFixed(1)) + 'deg');
     void el.offsetWidth;
     el.className = 'hud-toast show' + (cls ? ' ' + cls : '');
     clearTimeout(Hud.toastTimer);
@@ -2010,20 +2121,43 @@ window.LW = window.LW || {};
     if (Hud.subQ.length > 4) Hud.subQ.shift();
     if (!Hud.subBusy) subNext();
   }
+  // Earpiece line: speaker tag + typewriter reveal, hold long enough to read, then fade out.
+  var SUB_CPS = 46;
   function subNext() {
     var t = Hud.subQ.shift();
-    clearTimeout(Hud.subTimer);
-    if (t === undefined) { Hud.subBusy = false; E.sub.classList.remove('on'); return; }
+    clearTimeout(Hud.subTimer); clearInterval(Hud.typeTimer);
+    if (t === undefined) { Hud.subBusy = false; E.sub.classList.remove('on'); E.sub.classList.remove('typing'); return; }
     Hud.subBusy = true;
     var m = /^([A-Z][A-Za-z .'\-]{0,24}):\s*([\s\S]*)$/.exec(t);
-    E.subSpeaker.textContent = m ? m[1].toUpperCase() + ':' : '';
-    E.subText.textContent = m ? m[2] : t;
+    var speaker = m ? m[1].toUpperCase() : '', body = m ? m[2] : t;
+    E.subSpeaker.textContent = speaker;
+    E.subSr.textContent = (speaker ? speaker + ': ' : '') + body;
+    var hold = clamp(1600 + body.length * 38, 2600, 5600);
+    var finish = function () {
+      clearInterval(Hud.typeTimer);
+      E.subText.textContent = body;
+      E.sub.classList.remove('typing');
+      Hud.subTimer = setTimeout(function () {
+        if (Hud.subQ.length) {
+          E.sub.classList.remove('on');
+          Hud.subTimer = setTimeout(subNext, 260);
+        } else { E.sub.classList.remove('on'); Hud.subBusy = false; }
+      }, hold);
+    };
     E.sub.classList.add('on');
-    var dur = clamp(2400 + t.length * 30, 3600, 6000);
-    Hud.subTimer = setTimeout(function () {
-      if (Hud.subQ.length) subNext();
-      else { E.sub.classList.remove('on'); Hud.subBusy = false; }
-    }, dur);
+    Audio.play('radio');
+    if (reduceMotion || !body) { finish(); return; }
+    // typed part + invisible rest, so the band keeps its final size while the text types in
+    clear(E.subText);
+    var typed = mk('span', 'typed'), ghost = mk('span', 'ghost', body);
+    E.subText.appendChild(typed); E.subText.appendChild(ghost);
+    E.sub.classList.add('typing');
+    var t0 = now(), shown = 0;
+    Hud.typeTimer = setInterval(function () {
+      var n = Math.min(body.length, Math.floor((now() - t0) / 1000 * SUB_CPS));
+      if (n !== shown) { shown = n; typed.textContent = body.slice(0, n); ghost.textContent = body.slice(n); }
+      if (n >= body.length) finish();
+    }, 33);
   }
 
   function onGameEvent(evt) {
@@ -2051,10 +2185,24 @@ window.LW = window.LW || {};
   function maybeHint() {
     if (store.get(HINT_KEY, false)) return;
     store.set(HINT_KEY, true);
+    var st = save.settings;
+    clear(E.hintTouch);
+    var add = function (txt, bold) { E.hintTouch.appendChild(bold ? mk('b', null, txt) : document.createTextNode(txt)); };
+    add(st.aimInvert ? 'Drag to move the view. ' : 'Drag to move the crosshair. ');
+    add(st.tapToScope ? 'Tap the city to zoom in there. ' : 'Tap SCOPE to zoom in. ');
+    add('Hold '); add('STEADY', true); add(', then '); add('FIRE', true); add('.');
     E.hintKeys.hidden = !(matches('(pointer: fine)') || matches('(any-pointer: fine)'));
     E.hint.hidden = false;
     clearTimeout(Hud.hintTimer);
-    Hud.hintTimer = setTimeout(hideHint, 9000);
+    Hud.hintTimer = setTimeout(hideHint, 10000);
+  }
+  function aimOptions() {
+    var st = save.settings;
+    return { sensitivity: st.sensitivity, invertDrag: !!st.aimInvert, tapToScope: st.tapToScope !== false };
+  }
+  function pushAimOptions() {
+    if (!Play.active) return;
+    try { if (LW.Core && typeof LW.Core.setOptions === 'function') LW.Core.setOptions(aimOptions()); } catch (e) { /* ignore */ }
   }
 
   function beginPlay(m) {
@@ -2074,6 +2222,9 @@ window.LW = window.LW || {};
     E.canvas.hidden = false;
     E.hud.hidden = false;
     hudSetup(m, lo);
+    BriefType.forId = null;
+    Audio.unlock();     // beginPlay runs from a tap: retry creating/resuming the context here
+    Audio.resume();
     Audio.setMenu(false);
     Audio.ambience(m.time || 'night');
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2088,7 +2239,7 @@ window.LW = window.LW || {};
       onPause: function () { if (tk === Play.token) showPause(); }
     };
     try {
-      LW.Core.start(m, lo, hooks, { sensitivity: save.settings.sensitivity });
+      LW.Core.start(m, lo, hooks, aimOptions());
     } catch (e) {
       endPlay();
       showError('The rifle jammed', 'The mission could not start.\n' + (e && e.message ? e.message : String(e)), true, showMissions);
@@ -2103,7 +2254,9 @@ window.LW = window.LW || {};
     E.hud.hidden = true;
     E.pause.hidden = true;
     hideHint();
-    clearTimeout(Hud.subTimer);
+    clearTimeout(Hud.subTimer); clearInterval(Hud.typeTimer); clearTimeout(Hud.toastTimer);
+    Hud.subQ = []; Hud.subBusy = false;
+    if (E.sub) { E.sub.classList.remove('on'); E.sub.classList.remove('typing'); }
   }
 
   /* ---------- pause ---------- */
@@ -2118,6 +2271,8 @@ window.LW = window.LW || {};
     E.pauseMission.textContent = (m.title || '') + (m.location ? ' \u00b7 ' + m.location : '');
     clear(E.pauseObjectives);
     each(arr(m.objectives), function (o) { E.pauseObjectives.appendChild(mk('li', null, String(o))); });
+    syncSettingsUI();
+    E.pause.scrollTop = 0;
     E.pause.hidden = false;
     E.breath.classList.remove('pressed');
     focusSoon(E.pauseResume);
@@ -2164,7 +2319,59 @@ window.LW = window.LW || {};
     renderResults(m, result, win, st, reward, prev);
     showScreen('results', win && !E.resNext.hidden ? 'res-next' : 'res-retry');
     Audio.play(win ? 'win' : 'fail');
-    if (win && reward > 0) setTimeout(function () { Audio.play('cash'); }, 750);
+    resultsSequence(win, st, reward);
+  }
+
+  // Stars stamp in one after another, then the stamp, then the money counts up.
+  var ResAnim = { token: 0, raf: 0, timers: [] };
+  function resLater(ms, fn) { ResAnim.timers.push(setTimeout(fn, ms)); }
+  function resCancel() {
+    ResAnim.token++;
+    each(ResAnim.timers, function (t) { clearTimeout(t); });
+    ResAnim.timers = [];
+    if (ResAnim.raf) cancelAnimationFrame(ResAnim.raf);
+    ResAnim.raf = 0;
+  }
+  function countUp(el, from, to, ms, tk, done, silent) {
+    var t0 = now(), lastTick = 0;
+    var step = function () {
+      if (tk !== ResAnim.token) return;
+      var t = now(), k = clamp((t - t0) / ms, 0, 1), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmtMoney(from + (to - from) * e);
+      if (!silent && t - lastTick > 70 && k < 1) { Audio.play('type'); lastTick = t; }
+      if (k < 1) ResAnim.raf = requestAnimationFrame(step);
+      else { ResAnim.raf = 0; if (done) done(); }
+    };
+    step();
+  }
+  function resultsSequence(win, st, reward) {
+    resCancel();
+    var tk = ResAnim.token, i;
+    var stars = E.resStars.childNodes;
+    var STEP = 320, START = 420;
+    for (i = 0; i < stars.length; i++) {
+      stars[i].style.animationDelay = (reduceMotion ? 0 : (START + i * STEP) / 1000) + 's';
+      if (win && i < st) resLater(reduceMotion ? 0 : START + i * STEP + 160, function () { if (tk === ResAnim.token) Audio.play('stamp'); });
+    }
+    var stampAt = reduceMotion ? 0 : START + 3 * STEP + 80;
+    resLater(stampAt, function () {
+      if (tk !== ResAnim.token) return;
+      E.resStamp.classList.add('go');
+      Audio.play('stamp');
+    });
+    var total = E.resMoney.querySelector('dd.total'), bal = E.resBalance.querySelector('b');
+    if (!win || reward <= 0 || reduceMotion || !total || !bal) {
+      if (win && reward > 0) resLater(stampAt + 300, function () { if (tk === ResAnim.token) Audio.play('cash'); });
+      return;
+    }
+    var before = save.money - reward;
+    total.textContent = fmtMoney(0);
+    bal.textContent = fmtMoney(before);
+    resLater(stampAt + 260, function () {
+      if (tk !== ResAnim.token) return;
+      countUp(total, 0, reward, 900, tk, function () { Audio.play('cash'); });
+      countUp(bal, before, save.money, 900, tk, null, true);
+    });
   }
 
   function renderResults(m, result, win, st, reward, prev) {
@@ -2174,11 +2381,9 @@ window.LW = window.LW || {};
     E.resTitle.textContent = win ? 'Mission complete' : 'Contract failed';
     E.resReason.textContent = win ? (m === RANGE ? 'Range session logged. The club pays in cash.' : 'Contract fulfilled. Payment has been wired.') : failReason(m, result);
     clear(E.resStars);
-    for (i = 0; i < 3; i++) {
-      var sp = mk('span', i < st ? null : 'off', i < st ? '\u2605' : '\u2606');
-      sp.style.animationDelay = (0.25 + i * 0.22) + 's';
-      E.resStars.appendChild(sp);
-    }
+    for (i = 0; i < 3; i++) E.resStars.appendChild(mk('span', i < st ? 'on' : 'off', i < st ? '\u2605' : '\u2606'));
+    E.resStamp.className = 'res-stamp' + (win ? '' : ' fail');
+    E.resStamp.textContent = win ? (m === RANGE ? 'Logged' : 'Paid') : 'Void';
     E.resStars.setAttribute('aria-label', st + ' of 3 stars');
     var best = Math.max(prev, st);
     E.resBest.textContent = win && st > prev && prev > 0 ? 'New best' : (best > 0 ? 'Best ' + starStr(best) : '');
@@ -2214,6 +2419,17 @@ window.LW = window.LW || {};
     E.resBalance.innerHTML = '';
     E.resBalance.appendChild(document.createTextNode('Balance '));
     E.resBalance.appendChild(mk('b', null, fmtMoney(save.money)));
+    if (!reduceMotion) {
+      var stagger = function (list, base) {
+        var k;
+        for (k = 0; k < list.length; k++) {
+          list[k].classList.add('reveal');
+          list[k].style.animationDelay = (base + Math.floor(k / 2) * 0.07).toFixed(2) + 's';
+        }
+      };
+      stagger(E.resStats.childNodes, 0.2);
+      stagger(E.resMoney.childNodes, 0.5);
+    }
 
     var nxt = win ? nextMission(m) : null;
     E.resNext.hidden = !(nxt && isUnlocked(nxt));
@@ -2223,6 +2439,7 @@ window.LW = window.LW || {};
   function leaveResults(action) {
     var m = Results.m, pend = Play.pendingAfter, endingShown = false;
     Play.pendingAfter = null;
+    resCancel();
     var go = function () {
       if (endingShown) { showTitle(); menuToast('Case closed.'); return; }
       if (action === 'retry' && m) beginPlay(m);
@@ -2242,9 +2459,10 @@ window.LW = window.LW || {};
   /* =====================================================================
    * Armory
    * ===================================================================== */
-  var Armory = { from: 'title' };
+  var Armory = { from: 'title', animate: false, bars: [] };
   function showArmory(from) {
     Armory.from = from || 'title';
+    Armory.animate = true;
     renderArmory();
     showScreen('armory', 'armory-back');
   }
@@ -2255,13 +2473,26 @@ window.LW = window.LW || {};
   function statRow(parent, label, frac, val, inv) {
     parent.appendChild(mk('span', 'stat-l', label));
     var bar = mk('span', 'stat-bar' + (inv ? ' inv' : ''));
-    var b = mk('b');
-    b.style.width = Math.round(clamp(frac, 0, 1) * 100) + '%';
+    var b = mk('b'), w = Math.round(clamp(frac, 0, 1) * 100) + '%';
+    if (Armory.animate && !reduceMotion) { b.style.width = '0%'; Armory.bars.push({ el: b, w: w }); }
+    else b.style.width = w;
     bar.appendChild(b);
     parent.appendChild(bar);
     parent.appendChild(mk('span', 'stat-v', val));
   }
+  function growBars() {
+    var list = Armory.bars;
+    Armory.bars = [];
+    if (!list.length) return;
+    // two frames so the 0% width is committed before the transition target is set
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        each(list, function (it, k) { it.el.style.transitionDelay = (0.12 + k * 0.02).toFixed(2) + 's'; it.el.style.width = it.w; });
+      });
+    });
+  }
   function renderArmory() {
+    Armory.bars = [];
     E.armoryMoney.textContent = fmtMoney(save.money);
     clear(E.armoryRifles);
     var maxD = 1, maxV = 1, maxS = 0.001, maxDrop = 0.001;
@@ -2273,8 +2504,13 @@ window.LW = window.LW || {};
     });
     each(WEAPONS, function (w) {
       var owned = save.weapons.indexOf(w.id) >= 0, eq = save.equipped === w.id, price = Math.max(0, num(w.price, 0));
-      var card = mk('div', 'rifle' + (eq ? ' equipped' : ''));
-      card.appendChild(mk('div', 'r-name', w.name || w.id));
+      var card = mk('div', 'rifle' + (eq ? ' equipped' : owned ? ' owned' : ' locked'));
+      var head = mk('div', 'r-head');
+      head.appendChild(mk('div', 'r-name', w.name || w.id));
+      if (eq) head.appendChild(mk('span', 'r-tag eq', 'Equipped'));
+      else if (owned) head.appendChild(mk('span', 'r-tag own', 'Owned'));
+      else head.appendChild(mk('span', 'r-tag ' + (save.money >= price ? 'price' : 'short'), fmtMoney(price)));
+      card.appendChild(head);
       var btn = mk('button', 'r-act ' + (owned ? 'btn' : 'btn-primary'));
       btn.type = 'button';
       btn.id = 'rifle-act-' + w.id;
@@ -2286,6 +2522,7 @@ window.LW = window.LW || {};
         btn.textContent = 'Buy ' + fmtMoney(price);
         if (save.money < price) {
           btn.disabled = true;
+          btn.className = 'r-act btn';
           btn.appendChild(mk('small', null, 'Need ' + fmtMoney(price - save.money) + ' more'));
         } else {
           btn.addEventListener('click', function () { buyWeapon(w); });
@@ -2309,7 +2546,7 @@ window.LW = window.LW || {};
     clear(E.armoryGear);
     each(GEAR, function (g) {
       var levels = arr(g.levels), lv = gearLevel(g.id), cur = levels[lv], nxt = levels[lv + 1], i;
-      var row = mk('div', 'gear-row');
+      var row = mk('div', 'gear-row' + (nxt ? '' : ' maxed'));
       row.appendChild(mk('div', 'g-name', g.name || g.id));
       var btn = mk('button', 'g-act ' + (nxt ? 'btn-primary' : 'btn'));
       btn.type = 'button';
@@ -2332,6 +2569,8 @@ window.LW = window.LW || {};
       row.appendChild(lvl);
       E.armoryGear.appendChild(row);
     });
+    growBars();
+    Armory.animate = false;
   }
   function equipWeapon(w) {
     if (save.weapons.indexOf(w.id) < 0) return;
@@ -2386,11 +2625,132 @@ window.LW = window.LW || {};
   /* =====================================================================
    * Settings
    * ===================================================================== */
+  // The settings screen and the pause overlay carry the same controls ('set-*' and 'pause-*').
+  var SET_PANELS = ['set', 'pause'];
+  var persistTimer = 0;
+  function persistSoon() { clearTimeout(persistTimer); persistTimer = setTimeout(persist, 250); }
+  function rangeFill(input) {
+    var mn = parseFloat(input.min), mx = parseFloat(input.max), v = parseFloat(input.value);
+    if (!isFinite(mn)) mn = 0;
+    if (!isFinite(mx) || mx <= mn) mx = mn + 1;
+    if (!isFinite(v)) v = mn;
+    input.style.setProperty('--fill', clamp((v - mn) / (mx - mn) * 100, 0, 100).toFixed(1) + '%');
+  }
+  function setOut(input, text) { var o = $(input.id + '-val'); if (o) o.textContent = text; }
+  function volText(v) { return v <= 0 ? 'Off' : String(Math.round(v * 100)); }
+  function segSet(seg, value) {
+    var bs = seg.querySelectorAll('button[data-v]'), i;
+    for (i = 0; i < bs.length; i++) {
+      var on = bs[i].getAttribute('data-v') === value;
+      bs[i].setAttribute('aria-checked', on ? 'true' : 'false');
+      bs[i].tabIndex = on ? 0 : -1;
+    }
+  }
+  function setRange(input, value, text) {
+    if (!input) return;
+    var s = String(value);
+    if (input.value !== s) input.value = s;
+    rangeFill(input);
+    setOut(input, text);
+  }
+  function syncSettingsUI() {
+    var st = save.settings;
+    each(SET_PANELS, function (p) {
+      var snd = $(p + '-sound'), drag = $(p + '-drag'), tap = $(p + '-tap');
+      if (snd) snd.checked = !st.muted;
+      setRange($(p + '-sfx-vol'), Math.round(st.sfxVolume * 100), volText(st.sfxVolume));
+      setRange($(p + '-music-vol'), Math.round(st.musicVolume * 100), volText(st.musicVolume));
+      setRange($(p + '-sensitivity'), st.sensitivity, st.sensitivity.toFixed(2) + '\u00d7');
+      if (drag) segSet(drag, st.aimInvert ? 'world' : 'follow');
+      if (tap) tap.checked = st.tapToScope !== false;
+    });
+    updateSoundBtn();
+  }
+  function applyAudio() {
+    var st = save.settings;
+    syncLegacyFlags(st);
+    Audio.setMuted(st.muted);
+    Audio.setVolumes(st.sfxVolume, st.musicVolume);
+  }
+  function updateSoundBtn() {
+    if (!E.soundBtn || !save) return;
+    var st = save.settings, off = st.muted || st.sfxVolume <= 0;
+    E.soundBtn.classList.toggle('muted', off);
+    E.soundBtn.classList.toggle('low', !off && st.sfxVolume < 0.45);
+    E.soundBtn.setAttribute('aria-pressed', off ? 'true' : 'false');
+  }
+  function toggleMute() {
+    var st = save.settings;
+    if (st.muted || st.sfxVolume <= 0) {
+      st.muted = false;
+      if (st.sfxVolume <= 0) st.sfxVolume = 0.8;
+    } else {
+      st.muted = true;
+    }
+    applyAudio(); syncSettingsUI(); persist();
+    if (!st.muted) Audio.play('click');
+  }
+  function bindSettingsPanel(p) {
+    var st = function () { return save.settings; };
+    var snd = $(p + '-sound'), sfxR = $(p + '-sfx-vol'), musR = $(p + '-music-vol');
+    var sens = $(p + '-sensitivity'), drag = $(p + '-drag'), tap = $(p + '-tap');
+    if (snd) snd.addEventListener('change', function () {
+      st().muted = !snd.checked;
+      if (!st().muted && st().sfxVolume <= 0 && st().musicVolume <= 0) st().sfxVolume = 0.8;
+      applyAudio(); syncSettingsUI(); persist();
+      if (!st().muted) Audio.play('click');
+    });
+    var vol = function (input, key) {
+      if (!input) return;
+      var f = function () {
+        var v = clamp((parseFloat(input.value) || 0) / 100, 0, 1);
+        st()[key] = Math.round(v * 100) / 100;
+        if (v > 0 && st().muted) st().muted = false;   // moving a volume up means "I want sound"
+        applyAudio(); syncSettingsUI(); persistSoon();
+      };
+      input.addEventListener('input', f);
+      input.addEventListener('change', function () {
+        f(); persist();
+        if (key === 'sfxVolume') Audio.play('bolt');   // let the player hear the new level
+      });
+    };
+    vol(sfxR, 'sfxVolume');
+    vol(musR, 'musicVolume');
+    if (sens) {
+      var sf = function () {
+        var v = clamp(parseFloat(sens.value) || 1, SENS_MIN, SENS_MAX);
+        st().sensitivity = Math.round(v * 100) / 100;
+        syncSettingsUI(); pushAimOptions(); persistSoon();
+      };
+      sens.addEventListener('input', sf);
+      sens.addEventListener('change', function () { sf(); persist(); });
+    }
+    if (drag) {
+      var pick = function (v, focus) {
+        st().aimInvert = v === 'world';
+        syncSettingsUI(); pushAimOptions(); persist();
+        Audio.play('click');
+        if (focus) { var b = drag.querySelector('button[data-v="' + v + '"]'); if (b) b.focus(); }
+      };
+      drag.addEventListener('click', function (e) {
+        var b = e.target && e.target.closest ? e.target.closest('button[data-v]') : null;
+        if (b) pick(b.getAttribute('data-v'), false);
+      });
+      drag.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault(); e.stopPropagation();
+          pick(st().aimInvert ? 'follow' : 'world', true);
+        }
+      });
+    }
+    if (tap) tap.addEventListener('change', function () {
+      st().tapToScope = !!tap.checked;
+      syncSettingsUI(); pushAimOptions(); persist();
+      Audio.play('click');
+    });
+  }
   function showSettings() {
-    E.setSound.checked = !!save.settings.sound;
-    E.setMusic.checked = !!save.settings.music;
-    E.setSens.value = String(save.settings.sensitivity);
-    E.setSensVal.textContent = save.settings.sensitivity.toFixed(2) + '\u00d7';
+    syncSettingsUI();
     showScreen('settings', 'settings-back');
   }
   function resetProgress() {
@@ -2451,9 +2811,12 @@ window.LW = window.LW || {};
   }
 
   function bindAll() {
-    // audio unlock on the first gesture (and every gesture: cheap no-op once running)
-    document.addEventListener('pointerdown', function () { Audio.unlock(); if (E.hint && !E.hint.hidden) hideHint(); }, true);
-    document.addEventListener('touchend', function () { Audio.unlock(); }, true);
+    // audio unlock on every gesture type, capture phase so nothing can swallow it (cheap no-op once running)
+    var gesture = function () { Audio.unlock(); };
+    each(['pointerdown', 'touchstart', 'touchend', 'mousedown', 'click', 'keydown'], function (t) {
+      try { document.addEventListener(t, gesture, true); } catch (e) { /* ignore */ }
+    });
+    document.addEventListener('pointerdown', function () { if (E.hint && !E.hint.hidden) hideHint(); }, true);
 
     // title
     onClick(E.menuContinue, menuContinue);
@@ -2485,23 +2848,9 @@ window.LW = window.LW || {};
     // armory / settings
     onClick(E.armoryBack, armoryBack);
     onClick(E.settingsBack, function () { Audio.play('click'); showTitle(); });
-    if (E.setSound) E.setSound.addEventListener('change', function () {
-      save.settings.sound = !!E.setSound.checked; Audio.setSound(save.settings.sound); persist();
-      if (save.settings.sound) Audio.play('click');
-    });
-    if (E.setMusic) E.setMusic.addEventListener('change', function () {
-      save.settings.music = !!E.setMusic.checked; Audio.setMusic(save.settings.music); persist();
-    });
-    if (E.setSens) {
-      var sens = function () {
-        var v = clamp(parseFloat(E.setSens.value) || 1, 0.5, 2);
-        save.settings.sensitivity = Math.round(v * 100) / 100;
-        E.setSensVal.textContent = save.settings.sensitivity.toFixed(2) + '\u00d7';
-      };
-      E.setSens.addEventListener('input', sens);
-      E.setSens.addEventListener('change', function () { sens(); persist(); });
-    }
+    each(SET_PANELS, bindSettingsPanel);
     onClick(E.setReset, resetProgress);
+    onClick(E.briefDossier, function () { if (BriefType.timer) briefTypeDone(); });
 
     // pause
     onClick(E.pauseResume, function () { Audio.play('click'); hidePause(); });
@@ -2537,6 +2886,10 @@ window.LW = window.LW || {};
     if (E.pauseBtn) {
       E.pauseBtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
       E.pauseBtn.addEventListener('click', function (e) { e.stopPropagation(); Audio.play('click'); showPause(); });
+    }
+    if (E.soundBtn) {
+      E.soundBtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      E.soundBtn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); toggleMute(); });
     }
     if (E.hint) E.hint.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); hideHint(); });
 
@@ -2633,8 +2986,8 @@ window.LW = window.LW || {};
     indexData();
     save = loadSave();
     persist();
-    Audio.setSound(save.settings.sound);
-    Audio.setMusic(save.settings.music);
+    applyAudio();
+    syncSettingsUI();
     if (E.storyText) E.storyText.setAttribute('aria-live', 'polite');
     bindAll();
     showTitle();
