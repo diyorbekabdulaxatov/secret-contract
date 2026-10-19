@@ -47,8 +47,13 @@ if command -v firewall-cmd >/dev/null 2>&1 && sudo firewall-cmd --state >/dev/nu
   sudo firewall-cmd --reload
 elif command -v iptables >/dev/null 2>&1; then
   # Oracle's Ubuntu images ship an iptables REJECT rule; allow HTTP before it.
-  if ! sudo iptables -C INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null; then
-    sudo iptables -I INPUT 6 -p tcp --dport 80 -m state --state NEW -j ACCEPT
+  # Its position varies between images, so drop any old HTTP rule and insert right above the REJECT.
+  while sudo iptables -D INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT 2>/dev/null; do :; done
+  REJECT_AT=$(sudo iptables -L INPUT -n --line-numbers | awk '$2 == "REJECT" { print $1; exit }')
+  if [ -n "$REJECT_AT" ]; then
+    sudo iptables -I INPUT "$REJECT_AT" -p tcp --dport 80 -m state --state NEW -j ACCEPT
+  else
+    sudo iptables -A INPUT -p tcp --dport 80 -m state --state NEW -j ACCEPT
   fi
   if command -v netfilter-persistent >/dev/null 2>&1; then sudo netfilter-persistent save; fi
 fi
