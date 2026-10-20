@@ -2063,6 +2063,8 @@ window.LW = window.LW || {};
     if (C.scoped !== sc) {
       C.scoped = sc;
       E.scope.classList.toggle('on', sc);
+      // While scoped the target sits near the centre, so subtitles move to the top edge.
+      document.documentElement.classList.toggle('lw-scoped', sc);
       E.zoomIn.hidden = !sc; E.zoomOut.hidden = !sc; E.zoom.hidden = !sc;
     }
     if (sc) {

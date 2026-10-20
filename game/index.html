@@ -457,6 +457,8 @@ input[type="range"]:focus-visible { outline-offset: 2px; }
   opacity: 0; transform: translateY(6px); transition: opacity .4s ease, transform .4s var(--ease-out);
 }
 .hud-sub.on { opacity: 1; transform: none; }
+.lw-scoped .hud-sub-wrap { top: calc(var(--pad) + env(safe-area-inset-top, 0px)); bottom: auto; align-items: flex-start; }
+.lw-scoped .hud-sub { font-size: .92em; padding-block: 5px; }
 #hud-sub-speaker {
   display: inline-block; margin-right: 8px; padding: 1px 6px 0 18px; position: relative; vertical-align: 1px;
   background: var(--sodium); color: var(--ink); font-family: var(--f-ui); font-weight: 600; font-size: 12px; letter-spacing: .22em; line-height: 1.4; text-transform: uppercase;

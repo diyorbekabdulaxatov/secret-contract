@@ -2684,13 +2684,17 @@ window.LW = window.LW || {};
       o = Math.round(LW.drop(d, lo) * s);
       if (o < 10 || o > r * 0.86) continue;
       lit = i === near;
-      w = lit ? 16 : 11;
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      // Only the mark for the measured range gets a label; the rest stay small so they never
+      // cover a close target sitting near the centre.
+      w = lit ? 16 : 6;
+      ctx.lineWidth = lit ? 3 : 2; ctx.strokeStyle = 'rgba(0,0,0,0.45)';
       ctx.beginPath(); ctx.moveTo(x - w, cy + o + 0.5); ctx.lineTo(x - 2, cy + o + 0.5); ctx.stroke();
-      ctx.lineWidth = lit ? 2 : 1.3; ctx.strokeStyle = lit ? '#ffb347' : 'rgba(232,163,61,0.85)';
+      ctx.lineWidth = lit ? 2 : 1; ctx.strokeStyle = lit ? '#ffb347' : 'rgba(232,163,61,0.55)';
       ctx.beginPath(); ctx.moveTo(x - w, cy + o + 0.5); ctx.lineTo(x - 2, cy + o + 0.5); ctx.stroke();
-      ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = lit ? '#ffb347' : 'rgba(232,163,61,0.9)';
-      ctx.strokeText(String(d), x - w - 4, cy + o); ctx.fillText(String(d), x - w - 4, cy + o);
+      if (lit) {
+        ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = '#ffb347';
+        ctx.strokeText(String(d), x - w - 4, cy + o); ctx.fillText(String(d), x - w - 4, cy + o);
+      }
     }
   }
 
