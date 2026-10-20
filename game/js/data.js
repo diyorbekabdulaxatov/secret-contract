@@ -134,7 +134,7 @@ window.LW = window.LW || {};
 
   // ===== RANGE (chapter 0) =====
   missions.push({
-    id: 'range', chapter: 0, title: 'Cold Range', location: 'Varenne Rifle Club, 06:30',
+    id: 'range', chapter: 0, practice: true, title: 'Cold Range', location: 'Varenne Rifle Club, 06:30',
     briefing: "The club opens at eight. Until then the range is yours. Ten paper targets from eighty to four hundred metres. Learn how far the bullet falls before you need to know it.",
     objectives: ['Knock down all ten paper targets', 'Do not shoot the range keeper'],
     intel: [

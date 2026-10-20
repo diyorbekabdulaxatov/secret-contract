@@ -8,7 +8,7 @@ window.LW = window.LW || {};
     WORLD_H: 1000,     // world height in world units; every mission uses it
     PERSON_K: 3600,    // person height (world units) = PERSON_K / dist (m)
     DROP_K: 5.0e-5,    // bullet drop (world units, downward) = DROP_K * dist^2 * loadout.dropMul
-    WIND_K: 0.0034,    // wind drift (world units) = WIND_K * wind(m/s, + blows right) * dist
+    WIND_K: 0.0018,    // wind drift (world units) = WIND_K * wind(m/s, + blows right) * dist
     MARK: 5,           // reticle hash spacing in world units
     OPTIC: 5,          // camera zoom per 1x of scope magnification (a 4x scope shows the world at zoom 20)
     MIN_DIST: 60,

@@ -144,9 +144,9 @@ window.LW = window.LW || {};
       dark: 0.72, wallK: 1.25, lightA: 0.55, lampK: 0.45, wet: 0.35, beams: false, rain: 0, fog: 0.15, sky2: 'dawn',
       glow: '#d9b2a4', glowA: 0.3, veil: 0.16, keyX: 0.78, stars: 0, storm: false },
     fog: { sky: [[0, '#535d63'], [0.45, '#78838a'], [0.72, '#949ea2'], [1, '#a2aaac']],
-      haze: '#959fa3', hazeMax: 0.9, silo: '#3a4248', cloud: '#a0a8aa', cloudA: 0.2, rim: '#dfe3e0',
+      haze: '#959fa3', hazeMax: 0.7, silo: '#3a4248', cloud: '#a0a8aa', cloudA: 0.2, rim: '#dfe3e0',
       dark: 0.72, wallK: 1.1, lightA: 0.75, lampK: 0.9, wet: 0.4, beams: true, rain: 0, fog: 1, sky2: 'diffuse',
-      glow: '#c3cac9', glowA: 0.25, veil: 0.3, keyX: 0.5, stars: 0, storm: false }
+      glow: '#c3cac9', glowA: 0.25, veil: 0.18, keyX: 0.5, stars: 0, storm: false }
   };
 
   var STYLE = {
@@ -2665,6 +2665,35 @@ window.LW = window.LW || {};
     ctx.beginPath(); ctx.arc(cx, cy, 0.6, 0, TAU); ctx.fill();
   }
 
+  // Bullet-drop scale: amber marks left of the vertical line showing where the bullet lands at
+  // 200-600 m for the current rifle. Put the target on the mark for its range (wind still applies).
+  // The mark nearest the rangefinder reading is highlighted.
+  var DROP_MARKS = [200, 300, 400, 500, 600];
+  function dropScale(ctx, cx, cy, r, s, lo, range) {
+    if (!lo || !(s > 0)) return;
+    var x = Math.round(cx) + 0.5, i, d, o, near = -1, best = 1e9, w, lit;
+    if (typeof range === 'number') {
+      for (i = 0; i < DROP_MARKS.length; i++) {
+        if (Math.abs(DROP_MARKS[i] - range) < best) { best = Math.abs(DROP_MARKS[i] - range); near = i; }
+      }
+      if (best > 50) near = -1;
+    }
+    ctx.font = '10px ' + FONT; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (i = 0; i < DROP_MARKS.length; i++) {
+      d = DROP_MARKS[i];
+      o = Math.round(LW.drop(d, lo) * s);
+      if (o < 10 || o > r * 0.86) continue;
+      lit = i === near;
+      w = lit ? 16 : 11;
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.beginPath(); ctx.moveTo(x - w, cy + o + 0.5); ctx.lineTo(x - 2, cy + o + 0.5); ctx.stroke();
+      ctx.lineWidth = lit ? 2 : 1.3; ctx.strokeStyle = lit ? '#ffb347' : 'rgba(232,163,61,0.85)';
+      ctx.beginPath(); ctx.moveTo(x - w, cy + o + 0.5); ctx.lineTo(x - 2, cy + o + 0.5); ctx.stroke();
+      ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.fillStyle = lit ? '#ffb347' : 'rgba(232,163,61,0.9)';
+      ctx.strokeText(String(d), x - w - 4, cy + o); ctx.fillText(String(d), x - w - 4, cy + o);
+    }
+  }
+
   function drawScope(ctx, state, view, vw, vh, flash) {
     var cx = vw / 2, cy = vh / 2, r = LW.cam.scopeRadius(vw, vh), s = LW.cam.scale(view, vh), p, key, bw, hold = K.hold;
     ctx.save();
@@ -2701,6 +2730,7 @@ window.LW = window.LW || {};
     ctx.strokeStyle = 'rgba(200,225,240,0.09)'; ctx.lineWidth = Math.max(2, r * 0.035);
     ctx.beginPath(); ctx.arc(cx, cy, r * 0.9, PI * 1.08, PI * 1.42); ctx.stroke();
     reticle(ctx, cx, cy, r, s);
+    dropScale(ctx, cx, cy, r, s, state.loadout, state.range);
     if (state.predicted && typeof state.predicted.x === 'number' && typeof state.predicted.y === 'number') {
       p = LW.cam.worldToScreen(view, vw, vh, state.predicted.x, state.predicted.y);
       ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3;

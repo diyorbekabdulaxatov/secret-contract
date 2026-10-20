@@ -213,3 +213,8 @@ Save via `LW.store` under key `silentContract.save.v1`: `{ money, weapons: [ids]
 - **Page gestures:** while a mission runs, core sets `touch-action: none` and `overscroll-behavior: none` on html/body and cancels canvas touchmove, so drags never scroll the page.
 - **Audio (ui.js):** `LW.Audio.setVolumes(sfx, music)`, `setMuted`, `isMuted`, `getState()`. Saves gain `sfxVolume`, `musicVolume`, `muted`, `aimInvert`, `tapToScope`.
 - **Building windows:** bay size is 5000/dist by 6000/dist world units (about 2.5 m by 3 m).
+- **Balance (2026-10-20):** `WIND_K` is 0.0018 (was 0.0034), so wind drift at 500 m is about one body height at most. Fog on `fog` missions is thinner (`hazeMax` 0.7, `veil` 0.18).
+- **Bullets sweep outward:** `fire()` no longer resolves a bullet at the crosshair's range. Each frame, every person the bullet has just reached (`(t - fromT) * velocity >= e.dist`) is tested at their current position; the nearest hit stops the bullet. Bullets carry `passed: { entityId: true }`; `hitT` is the flight time to the farthest living person or the crosshair range, whichever is farther.
+- **Rangefinder hold-over:** while the crosshair is within 2.5 body heights sideways and 4 above the person last measured, `state.range` keeps that person's distance instead of jumping to the wall behind.
+- **Drop scale:** the scope shows amber marks at 200 to 600 m below the centre for the current loadout (render `dropScale`); the mark nearest `state.range` is highlighted.
+- **Practice missions:** a mission with `practice: true` (the range) pays 10 per headshot and 30 for no misses instead of 50 and 100.

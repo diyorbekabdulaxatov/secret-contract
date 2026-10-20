@@ -69,6 +69,7 @@ window.LW = window.LW || {};
   var ending = null;          // { win, reason, delay }
   var endCalled = false;
   var tKills = 0, tHeads = 0, rewardHeads = 0;
+  var lastLased = null;       // entity the rangefinder last measured (kept while holding over it)
   var idSeq = 0;
   var lastAlertSnd = -10;
   var boltSnd = false;
@@ -369,6 +370,14 @@ window.LW = window.LW || {};
       }
     }
     var r = best ? best.dist : null;
+    if (best) {
+      lastLased = best;
+    } else if (lastLased && lastLased.alive && !lastLased.removed) {
+      // Holding over or beside a target moves the crosshair off the body; keep its distance
+      // while the crosshair stays in the hold-over zone around the person last measured.
+      h = LW.personHeight(lastLased);
+      if (Math.abs(ax - lastLased.x) <= h * 2.5 && ay >= lastLased.y - h * 4 && ay <= lastLased.y + h) r = lastLased.dist;
+    }
     if (r == null) {
       var s = structureAt(ax, ay);
       if (s) r = s.dist;
@@ -400,9 +409,15 @@ window.LW = window.LW || {};
     }
     var dist = S.range != null ? S.range : DEFAULT_RANGE;
     var p = LW.impactAt(ax, ay, dist, S.wind, lo);
+    // The bullet flies until it has passed every person (or reached what the crosshair is on);
+    // updateBullets checks each person at the moment the bullet reaches their distance.
+    var end = dist, i;
+    for (i = 0; i < S.entities.length; i++) {
+      if (S.entities[i].alive && !S.entities[i].removed && S.entities[i].dist > end) end = S.entities[i].dist;
+    }
     S.bullets.push({
-      fromT: S.t, hitT: S.t + LW.flightTime(dist, lo), x: p.x, y: p.y, dist: dist,
-      ax: ax, ay: ay, wind: S.wind, suppressed: lo.suppressed
+      fromT: S.t, hitT: S.t + LW.flightTime(end, lo), x: p.x, y: p.y, dist: dist,
+      ax: ax, ay: ay, wind: S.wind, suppressed: lo.suppressed, passed: {}
     });
     addEffect('muzzle', ax, ay, 0);
     snd(lo.suppressed ? 'shotSuppressed' : 'shot');
@@ -441,13 +456,26 @@ window.LW = window.LW || {};
     return Math.sqrt(dx * dx + dy * dy);
   }
 
+  // Bullets sweep outward: each frame, every person whose distance the bullet has just reached is
+  // tested against where they stand at that moment, so moving targets need lead for their own
+  // distance no matter what the crosshair rests on. The nearest person hit stops the bullet.
   function updateBullets() {
-    var i = 0;
+    var i = 0, b, travelled, j, e, p, part, best;
     while (i < S.bullets.length) {
-      var b = S.bullets[i];
-      if (S.t >= b.hitT) {
+      b = S.bullets[i];
+      travelled = (S.t - b.fromT) * lo.velocity;
+      best = null;
+      for (j = 0; j < S.entities.length; j++) {
+        e = S.entities[j];
+        if (!e.alive || e.removed || b.passed[e.id] || e.dist > travelled) continue;
+        b.passed[e.id] = true;
+        p = LW.impactAt(b.ax, b.ay, e.dist, b.wind, lo);
+        part = LW.hitTest(e, p.x, p.y);
+        if (part && (!best || e.dist < best.e.dist)) best = { e: e, part: part, p: p };
+      }
+      if (best || S.t >= b.hitT) {
         S.bullets.splice(i, 1);
-        resolveBullet(b);
+        resolveBullet(b, best);
         if (!S || S.status === 'ended') return;
       } else {
         i++;
@@ -455,15 +483,8 @@ window.LW = window.LW || {};
     }
   }
 
-  function resolveBullet(b) {
-    var best = null, i, e, p, part;
-    for (i = 0; i < S.entities.length; i++) {
-      e = S.entities[i];
-      if (!e.alive || e.removed) continue;
-      p = LW.impactAt(b.ax, b.ay, e.dist, b.wind, lo);
-      part = LW.hitTest(e, p.x, p.y);
-      if (part && (!best || e.dist < best.e.dist)) best = { e: e, part: part, p: p };
-    }
+  function resolveBullet(b, best) {
+    var i, e;
     var ix, iy;
     if (best) {
       S.stats.hits++;
@@ -830,8 +851,10 @@ window.LW = window.LW || {};
     var bonuses = [], reward = 0, i;
     if (win) {
       bonuses.push({ label: 'Contract', amount: num(S.mission.reward, 0) });
-      if (rewardHeads > 0) bonuses.push({ label: 'Headshots \u00d7' + rewardHeads, amount: 50 * rewardHeads });
-      if (st.shots > 0 && st.hits >= st.shots) bonuses.push({ label: 'No wasted rounds', amount: 100 });
+      // Practice missions (the repeatable range) pay small bonuses so they cannot outearn contracts.
+      var practice = !!S.mission.practice;
+      if (rewardHeads > 0) bonuses.push({ label: 'Headshots \u00d7' + rewardHeads, amount: (practice ? 10 : 50) * rewardHeads });
+      if (st.shots > 0 && st.hits >= st.shots) bonuses.push({ label: 'No wasted rounds', amount: practice ? 30 : 100 });
       if (st.civilians > 0) bonuses.push({ label: 'Civilian casualties', amount: -150 * st.civilians });
       for (i = 0; i < bonuses.length; i++) reward += bonuses[i].amount;
       reward = Math.max(0, reward);
@@ -1145,6 +1168,7 @@ window.LW = window.LW || {};
     ending = null;
     endCalled = false;
     tKills = 0; tHeads = 0; rewardHeads = 0;
+    lastLased = null;
     lastTs = null;
     var i;
     for (i = 0; i < 4; i++) swayPh[i] = Math.random() * Math.PI * 2;
